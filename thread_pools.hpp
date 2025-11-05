@@ -13,49 +13,56 @@
 
 #define INITIAL_THREAD_VECTOR_SIZE 1000
 
-typedef struct {
-    std::thread thread_main;
-    uint32_t thread_id;
-}thread_info_t;
-
-// Core Funtional Requirements
-// Fixed or Configurable Number of Threads
-// Allow specifying the number of worker threads at construction.
-
-// Task Submission Interface
-// Support submitting arbitrary callable objects (lambdas, functions, functors).
-// Return a std::future for result retrieval.
-
-// Thread-Safe Task Queue
-// Ensure multiple threads can safely push and pop tasks concurrently.
-
-// Worker Thread Loop
-// Threads should continuously wait for tasks and execute them when available.
-
 class thread_pool 
 {
     private:
-        std::vector<thread_info_t> thread_info_vector;
         std::vector<std::thread> thread_vector; 
         uint32_t thread_quantity; 
 
-        std::mutex queue_mutex; 
+        mutable std::mutex queue_mutex; 
         std::condition_variable task_condition; 
         std::queue<std::function<void(void)>> task_queue;
         std::atomic<bool> stop = false; 
 
         void worker_task(void);
+        void dequeue_task(); 
 
     public: 
         explicit thread_pool(size_t original_vector_size = 1000);
-        void enqueue_task(std::function<void()> desired_task);
-        void dequeue_task(); 
 
-        void delete_thread(uint32_t thread_id);
-        void check_task_queue();
+        template<typename T, typename... Args>
+        auto enqueue_task(std::function<T(Args...)> desired_task)
+        -> std::future<>;
+
+        void enqueue_task(std::function<void()> desired_task);
+        void delete_thread(); 
+        void add_thread();
+        void check_task_queue() const;
         void resize_thread_pool(uint32_t inputed_size);
         thread_pool& operator=(const thread_pool&) = delete; 
         ~thread_pool();
 };
+
+// template<typename F, typename... Args>
+// auto enqueue_task(F&& f, Args&&... args) 
+// -> std::future<typename std::invoke_result<F, Args...>::type>
+// {
+//     using return_type = typename std::invoke_result<F, Args...>::type;
+    
+//     auto task = std::make_shared<std::packaged_task<return_type()>>(
+//     std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+//     );
+    
+//     std::future<return_type> res = task->get_future();
+//     {
+//     std::unique_lock<std::mutex> lock(queue_mutex);
+//     if(stop) {
+//         throw std::runtime_error("enqueue on stopped thread_pool");
+//     }
+//     task_queue.emplace([task](){ (*task)(); });
+//     }
+//     task_condition.notify_one();
+//     return res;
+// }
 
 #endif
