@@ -25,7 +25,7 @@ class thread_pool
         std::atomic<bool> stop = false; 
 
         void worker_task(void);
-        void dequeue_task(); 
+        void dequeue_task();
 
     public: 
         explicit thread_pool(size_t original_vector_size = 1000);
