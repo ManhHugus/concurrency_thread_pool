@@ -10,59 +10,57 @@
 #include <future>
 #include <atomic>
 #include <iostream>
+#include "thread_safe_queue.hpp"
 
-#define INITIAL_THREAD_VECTOR_SIZE 1000
+#define INITIAL_THREAD_VECTOR_SIZE 16
+
+typedef enum {
+    LOW_PRIORITY = 0,
+    MEDIUM_PRIORITY,
+    HIGH_PRIORITY
+} priority_t;
+
+typedef struct {
+    priority_t task_priority;
+    std::function<void()> task_function;
+} task_attributes_t;
 
 class thread_pool 
 {
     private:
-        std::vector<std::thread> thread_vector; 
-        uint32_t thread_quantity; 
-
-        mutable std::mutex queue_mutex; 
-        std::condition_variable task_condition; 
-        std::queue<std::function<void(void)>> task_queue;
-        std::atomic<bool> stop = false; 
+        thread_safe_queue<task_attributes_t> priority_work_queue;
+        thread_safe_queue<std::function<void()>> work_queue;
+        std::vector<std::thread> threads;
+        std::atomic<bool> stop = false;
 
         void worker_task(void);
-        void dequeue_task();
-
     public: 
-        explicit thread_pool(size_t original_vector_size = 1000);
+        explicit thread_pool(size_t original_vector_size = 16);
+        // void enqueue_task(std::function<void()> desired_task);
 
-        template<typename T, typename... Args>
-        auto enqueue_task(std::function<T(Args...)> desired_task)
-        -> std::future<>;
+        template<typename FunctionType, typename... Args>
+        auto submit_task(FunctionType&& f, Args&&... args)
+        -> std::future<typename std::invoke_result<FunctionType, Args...>::type>
+        {
+            using return_type = typename std::invoke_result<FunctionType, Args...>::type;
 
-        void enqueue_task(std::function<void()> desired_task);
-        void delete_thread(); 
-        void add_thread();
-        void check_task_queue() const;
-        void resize_thread_pool(uint32_t inputed_size);
-        thread_pool& operator=(const thread_pool&) = delete; 
+            // Create a packaged_task with bound arguments
+            auto task_ptr = std::make_shared<std::packaged_task<return_type()>>(
+            std::bind(std::forward<FunctionType>(f), std::forward<Args>(args)...)
+            );
+
+            std::future<return_type> res = task_ptr->get_future();
+
+            // Push a void() lambda that calls the packaged_task
+            work_queue.push([task_ptr]() { (*task_ptr)(); });
+            work_queue.notify_data_condition();
+
+            return res;
+        }
+
+        thread_pool(const thread_pool&) = delete;
+        thread_pool& operator=(const thread_pool&) = delete;
         ~thread_pool();
 };
-
-// template<typename F, typename... Args>
-// auto enqueue_task(F&& f, Args&&... args) 
-// -> std::future<typename std::invoke_result<F, Args...>::type>
-// {
-//     using return_type = typename std::invoke_result<F, Args...>::type;
-    
-//     auto task = std::make_shared<std::packaged_task<return_type()>>(
-//     std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-//     );
-    
-//     std::future<return_type> res = task->get_future();
-//     {
-//     std::unique_lock<std::mutex> lock(queue_mutex);
-//     if(stop) {
-//         throw std::runtime_error("enqueue on stopped thread_pool");
-//     }
-//     task_queue.emplace([task](){ (*task)(); });
-//     }
-//     task_condition.notify_one();
-//     return res;
-// }
 
 #endif
