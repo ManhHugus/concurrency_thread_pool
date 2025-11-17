@@ -2,18 +2,48 @@
 
 thread_pool::thread_pool(size_t original_vector_size) : stop(false)
 {
-    for (size_t index = 0; index < original_vector_size; index++) {
-        worker_threads.emplace_back([this]{this->worker_task();});
+    try
+    {
+        for (unsigned index = 0; index < original_vector_size; index++) {
+            worker_task_queues.push_back(std::make_unique<work_stealing_queue<task_attributes_t>>());
+            worker_threads.push_back(std::thread(&thread_pool::worker_task, this, index));
+        }
     }
+    catch(...)
+    {
+        stop.store(true, std::memory_order_relaxed);
+        throw;
+    }
+    
+    // for (unsigned index = 0; index < original_vector_size; index++) {
+    //     worker_threads.emplace_back([this, index]{this->worker_task(index);});
+    // }
 }
 
-void thread_pool::worker_task(void)
+void thread_pool::worker_task(unsigned thread_index)
 {
     while (!stop)
     {
+        local_thread_index = thread_index;
+        local_work_stealing_queue = worker_task_queues[thread_index].get();
         task_attributes_t task_attr;
+
+        if (pop_task_from_local_queue(task_attr) ||
+            pop_task_from_pool_queue(task_attr) ||
+            pop_task_from_other_queues(task_attr)) 
+        {
+            try {
+                task_attr.task_function();
+            }
+            catch(const std::exception& e) {
+                std::cerr << e.what() << '\n';
+            }
+            continue;
+        }
+
         priority_work_queue.wait_and_pop(task_attr,
              [this]{ return this->stop.load(std::memory_order_acquire);});
+
         try {
             task_attr.task_function();
         }
@@ -21,6 +51,34 @@ void thread_pool::worker_task(void)
             std::cerr << e.what() << '\n';
         }
     }
+}
+
+bool thread_pool::pop_task_from_local_queue(task_attributes_t& task_attr)
+{
+    return local_work_stealing_queue && !local_work_stealing_queue->empty() ? 
+        local_work_stealing_queue->pop_bottom(task_attr), true : false;
+}
+
+bool thread_pool::pop_task_from_pool_queue(task_attributes_t& task_attr)
+{
+    return priority_work_queue.try_pop(task_attr);
+}
+
+bool thread_pool::pop_task_from_other_queues(task_attributes_t& task_attr)
+{
+    for (size_t i = 0; i < worker_task_queues.size(); i++) {
+        unsigned const index = (local_thread_index + i + 1) % worker_task_queues.size(); // Avoid stealing from the first thread
+
+        if (index == local_thread_index) {
+            continue;
+        }
+
+        if (!worker_task_queues[index]->empty()) {
+            worker_task_queues[index]->steal_top(task_attr);
+            return true;
+        }
+    }
+    return false;
 }
     
 thread_pool::~thread_pool() 

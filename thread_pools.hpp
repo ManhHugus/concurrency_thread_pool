@@ -19,11 +19,18 @@ class thread_pool
         std::vector<std::thread> worker_threads;
         std::atomic<bool> stop = false;
 
-        void worker_task(void);
+        std::vector<std::unique_ptr<work_stealing_queue<task_attributes_t>>> worker_task_queues;
+
+        static thread_local work_stealing_queue<task_attributes_t>* local_work_stealing_queue;
+        static thread_local unsigned local_thread_index;
+
+        void worker_task(unsigned thread_index);
+        bool pop_task_from_local_queue(task_attributes_t& task_attr);
+        bool pop_task_from_pool_queue(task_attributes_t& task_attr);
+        bool pop_task_from_other_queues(task_attributes_t& task_attr);
         
     public: 
         explicit thread_pool(size_t original_vector_size = 16);
-        // void enqueue_task(std::function<void()> desired_task);
 
         template<typename FunctionType, typename... Args>
         auto submit_task(priority_t task_priority, FunctionType&& f, Args&&... args)

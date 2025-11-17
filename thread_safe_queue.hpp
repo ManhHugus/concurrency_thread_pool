@@ -38,11 +38,13 @@ class thread_safe_queue
     public:
         thread_safe_queue() {}
 
-        void notify_data_condition() {
+        void notify_data_condition() 
+        {
             data_condition.notify_one();
         }
 
-        void notify_all_data_condition() {
+        void notify_all_data_condition() 
+        {
             data_condition.notify_all();
         }
 
