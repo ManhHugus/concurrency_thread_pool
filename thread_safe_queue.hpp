@@ -27,10 +27,10 @@ struct custom_comparator {
     }
 };
 
-template<typename T> 
-class thread_safe_queue 
+template<typename T>
+class thread_safe_queue
 {
-    private: 
+    private:
         mutable std::mutex thread_safe_queue_mutex;
         std::priority_queue<T, std::vector<T>, custom_comparator> priority_data_queue;
         std::condition_variable data_condition;
@@ -94,10 +94,16 @@ class thread_safe_queue
             return return_shared_ptr_value;
         }
 
-        bool empty() const 
+        bool empty() const
         {
             std::lock_guard<std::mutex> lk(this->thread_safe_queue_mutex);
             return priority_data_queue.empty();
+        }
+
+        size_t size() const
+        {
+            std::lock_guard<std::mutex> lk(this->thread_safe_queue_mutex);
+            return priority_data_queue.size();
         }
 };
 
