@@ -22,8 +22,6 @@ void thread_pool::worker_task(unsigned thread_index)
     local_work_stealing_queue = worker_task_queue[thread_index].get();
     task_attributes_t task_attr;
     while (!stop) {
-
-
         if (pop_task_from_local_queue(task_attr) ||
             pop_task_from_pool_queue(task_attr) ||
             pop_task_from_other_queues(task_attr)) {
@@ -73,12 +71,18 @@ bool thread_pool::pop_task_from_other_queues(task_attributes_t& task_attr)
 void thread_pool::add_workers(size_t num_new_workers)
 {
     // Implementation for adding workers
-    
+    for (int i = 0; i < num_new_workers; i++) {
+        size_t new_thread_index = worker_threads.size();
+        worker_task_queue.push_back(std::make_unique<work_stealing_queue<task_attributes_t>>());
+        worker_threads.push_back(std::thread(&thread_pool::worker_task, this, new_thread_index));
+    }
 }
 
 void thread_pool::remove_workers(size_t num_workers_to_remove)
 {
     // Implementation for removing workers
+    
+    
 }
 
 void thread_pool::resize_pool(size_t new_size)
