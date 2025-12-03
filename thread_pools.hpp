@@ -13,7 +13,15 @@
 
 class thread_pool
 {
+    public:
+        enum class State {
+            RUNNING,    // Normal operation
+            SHUTDOWN,   // Reject new tasks, finish pending
+            STOPPED     // Reject new tasks, abandon pending
+        };
+
     private:
+
         std::atomic<size_t> total_tasks_executed{0};
         std::atomic<size_t> total_tasks_submitted{0};
         std::atomic<size_t> total_tasks_stolen{0};
@@ -24,11 +32,31 @@ class thread_pool
         std::mutex pool_mutex;
         std::condition_variable pool_condition_variable;
         std::atomic<bool> stop = false;
+        std::vector<std::atomic<bool>> per_thread_retire_flags;
 
         std::vector<std::unique_ptr<work_stealing_queue<task_attributes_t>>> worker_task_queue;
 
         static thread_local work_stealing_queue<task_attributes_t> *local_work_stealing_queue;
         static thread_local unsigned local_thread_index;
+
+        // Phase 5: Dynamic scaling configuration
+        size_t min_threads;
+        size_t max_threads;
+        std::atomic<bool> auto_scaling_enabled{false};
+        std::thread scaling_monitor_thread;
+        std::atomic<State> pool_state{State::RUNNING};
+        
+        // Thresholds for scaling decisions
+        size_t scale_up_threshold = 10;    // Tasks per thread before scaling up
+        size_t scale_down_threshold = 2;   // Tasks per thread before scaling down
+        std::chrono::milliseconds monitor_interval{1000}; // Check every 1 second
+        std::chrono::seconds idle_timeout{5}; // Time before considering scale down
+        
+        std::chrono::steady_clock::time_point last_busy_time;
+        
+        void monitor_and_scale();
+        size_t get_total_pending_tasks() const;
+        size_t get_active_thread_count() const;
 
         void worker_task(unsigned thread_index);
         bool pop_task_from_local_queue(task_attributes_t& task_attr);
@@ -44,9 +72,16 @@ class thread_pool
         {
             using return_type = typename std::invoke_result<FunctionType, Args...>::type;
 
+            // Check if pool is accepting new tasks
+            State current_state = pool_state.load();
+            if (current_state != State::RUNNING) {
+                // Throw exception or return invalid future
+                throw std::runtime_error("Thread pool is shutting down - not accepting new tasks");
+            }
+
             // Create a packaged_task with bound arguments
             auto task_ptr = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<FunctionType>(f), std::forward<Args>(args)...));
+                std::bind(std::forward<FunctionType>(f), std::forward<Args>(args)...));
 
             std::future<return_type> res = task_ptr->get_future();
 
@@ -98,6 +133,14 @@ class thread_pool
         void add_workers(size_t num_new_workers);
         void remove_workers(size_t num_workers_to_remove);
         void resize_pool(size_t new_size);
+
+        void enable_auto_scaling(size_t min_threads, size_t max_threads);
+        void disable_auto_scaling();
+        void set_scale_thresholds(size_t up_threshold, size_t down_threshold);
+
+        void shutdown(bool wait_for_pending = true);
+        State get_state() const { return pool_state.load(); }
+        bool is_running() const { return pool_state.load() == State::RUNNING; }
 
         thread_pool(const thread_pool&) = delete;
         thread_pool& operator=(const thread_pool&) = delete;
